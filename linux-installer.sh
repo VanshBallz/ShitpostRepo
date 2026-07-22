@@ -1,39 +1,68 @@
 #!/data/data/com.termux/files/usr/bin/bash
 
-set -e
+pkg update -y
+pkg install x11-repo -y
+pkg install proot-distro termux-x11-nightly pulseaudio virglrenderer-android wget -y
 
-echo "=============================================="
-echo "    Termux PRoot Linux & Desktop Installer    "
-echo "=============================================="
-echo ""
-
-# 1. Choose Distribution
 echo "Select Linux Distribution:"
 echo "1) Debian"
 echo "2) Ubuntu"
-read -rp "Enter choice [1-2]: " DISTRO_CHOICE
+read -p "Enter choice [1-2]: " DISTRO_CHOICE
 
-case $DISTRO_CHOICE in
-    1) DISTRO="debian" ;;
-    2) DISTRO="ubuntu" ;;
-    *) echo "Invalid choice. Exiting."; exit 1 ;;
-esac
+if [ "$DISTRO_CHOICE" -eq 1 ]; then
+    DISTRO="debian"
+elif [ "$DISTRO_CHOICE" -eq 2 ]; then
+    DISTRO="ubuntu"
+else
+    echo "Invalid selection."
+    exit 1
+fi
 
-# 2. Choose Desktop Environment
-echo ""
 echo "Select Desktop Environment:"
-echo "1) XFCE4 (Recommended)"
+echo "1) XFCE4"
 echo "2) KDE Plasma"
-read -rp "Enter choice [1-2]: " DE_CHOICE
+read -p "Enter choice [1-2]: " DE_CHOICE
 
-case $DE_CHOICE in
-    1)
-        DE_NAME="XFCE4"
-        DE_PKG="xfce4"
-        DE_CMD="startxfce4"
-        ;;
-    2)
-        DE_NAME="KDE Plasma"
+if [ "$DE_CHOICE" -eq 1 ]; then
+    DE_PKG="xfce4 xfce4-terminal"
+    DE_CMD="startxfce4"
+elif [ "$DE_CHOICE" -eq 2 ]; then
+    DE_PKG="kde-plasma-desktop"
+    DE_CMD="startplasma-x11"
+else
+    echo "Invalid selection."
+    exit 1
+fi
+
+read -p "Enter desired username: " USERNAME
+
+proot-distro install "$DISTRO"
+
+proot-distro login "$DISTRO" -- /bin/bash -c "apt update -y && apt install sudo nano adduser -y && adduser --disabled-password --gecos '' $USERNAME && echo '$USERNAME ALL=(ALL:ALL) ALL' >> /etc/sudoers"
+
+echo "Set a password for $USERNAME:"
+proot-distro login "$DISTRO" -- /bin/bash -c "passwd $USERNAME"
+
+proot-distro login "$DISTRO" -- /bin/bash -c "apt update -y && apt install $DE_PKG -y"
+
+cat << EOF > start.sh
+#!/data/data/com.termux/files/usr/bin/bash
+virgl_test_server_android &
+sleep 2
+kill -9 \$(pgrep -f "termux.x11") 2>/dev/null
+pulseaudio --start --load="module-native-protocol-tcp auth-ip-acl=127.0.0.1 auth-anonymous=1" --exit-idle-time=-1
+export XDG_RUNTIME_DIR=\${TMPDIR}
+termux-x11 :0 >/dev/null &
+sleep 3
+am start --user 0 -n com.termux.x11/com.termux.x11.MainActivity > /dev/null 2>&1
+sleep 1
+proot-distro login $DISTRO --shared-tmp -- /bin/bash -c 'export PULSE_SERVER=127.0.0.1 && export XDG_RUNTIME_DIR=\${TMPDIR} && su - $USERNAME -c "env DISPLAY=:0 GALLIUM_DRIVER=virpipe MESA_GL_VERSION_OVERRIDE=4.0 $DE_CMD"'
+exit 0
+EOF
+
+chmod +x start.sh
+
+echo "Installation complete! Run ./start.sh to launch your session."
         DE_PKG="kde-plasma-desktop"
         DE_CMD="startplasma-x11"
         ;;
